@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, List
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
+from playwright.sync_api import sync_playwright
 
 # Configure logging
 logging.basicConfig(
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Constants
 WHITEBIRD_API_URL = "https://admin-service.whitebird.io/api/v1/exchange/calculation"
 ALTYN_API_URL = "https://api.lk.altyn.one/website/rates/"
+CIFRA_URL = "https://cifra.by/catalog/"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
@@ -67,12 +69,63 @@ def get_altyn_rate() -> float:
         raise
 
 
+def get_cifra_rate() -> float:
+    """Fetches the exchange rate from Cifra by emulating a browser and intercepting API calls."""
+    logger.info("Starting browser emulation for Cifra...")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        )
+        page = context.new_page()
+        
+        target_json = {}
+        
+        def handle_response(response):
+            if "ticker?key=" in response.url:
+                try:
+                    data = response.json()
+                    target_json["data"] = data
+                except Exception:
+                    pass
+
+        page.on("response", handle_response)
+        
+        try:
+            # Using domcontentloaded to be faster, then waiting for the specific request
+            page.goto(CIFRA_URL, wait_until="domcontentloaded", timeout=60000)
+            
+            # Wait for the background request to be intercepted
+            for _ in range(15):
+                if "data" in target_json:
+                    break
+                page.wait_for_timeout(1000)
+            
+            if "data" not in target_json:
+                raise ValueError("Failed to intercept Cifra ticker data within timeout")
+                
+            tickers = target_json["data"].get("data", {}).get("ticker", [])
+            for t in tickers:
+                if t.get("ticker") == "USDT-RUB.IMEX":
+                    ltp = float(t.get("ltp"))
+                    logger.info(f"Cifra ratio: {ltp}")
+                    return ltp
+            
+            raise ValueError("USDT-RUB.IMEX ticker not found in Cifra response")
+        except Exception as e:
+            logger.error(f"Error fetching Cifra rate: {e}")
+            raise
+        finally:
+            browser.close()
+
+
 # Cell coordinates (you can change these)
 CELL_UPDATE_TIME = "C1"
 CELL_WHITEBIRD = "B2"
 CELL_ALTYN = "B3"
+CELL_CIFRA = "B4"
 
-def update_google_sheet(whitebird_rate: float, altyn_rate: float) -> None:
+def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float) -> None:
     """Updates specific cells in the Google Sheet with the latest rates."""
     service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
@@ -94,8 +147,9 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float) -> None:
         sheet.update_acell(CELL_UPDATE_TIME, now)
         sheet.update_acell(CELL_WHITEBIRD, whitebird_rate)
         sheet.update_acell(CELL_ALTYN, altyn_rate)
+        sheet.update_acell(CELL_CIFRA, cifra_rate)
         
-        logger.info(f"Successfully updated cells: {CELL_UPDATE_TIME}={now}, {CELL_WHITEBIRD}={whitebird_rate}, {CELL_ALTYN}={altyn_rate}")
+        logger.info(f"Successfully updated cells: {CELL_UPDATE_TIME}={now}, {CELL_WHITEBIRD}={whitebird_rate}, {CELL_ALTYN}={altyn_rate}, {CELL_CIFRA}={cifra_rate}")
     except Exception as e:
         logger.error(f"Error updating Google Sheet cells: {e}")
         raise
@@ -103,12 +157,13 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float) -> None:
 
 def main():
     try:
-        # Fetching rates from both sources
+        # Fetching rates from all sources
         whitebird_ratio = get_whitebird_rate()
         altyn_ratio = get_altyn_rate()
+        cifra_ratio = get_cifra_rate()
         
         # Updating the sheet
-        update_google_sheet(whitebird_ratio, altyn_ratio)
+        update_google_sheet(whitebird_ratio, altyn_ratio, cifra_ratio)
         
     except Exception as e:
         logger.error("Execution failed", exc_info=True)
