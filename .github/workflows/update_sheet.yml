@@ -1,7 +1,7 @@
 name: Update Google Sheet
 
 on:
-  workflow_dispatch: # Позволяет запускать вручную из вкладки Actions
+  workflow_dispatch:
 
 jobs:
   update-sheet:
@@ -15,16 +15,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip' # built-in caching for pip dependencies
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install Playwright Browsers
-        run: |
-          playwright install chromium
-          playwright install-deps chromium
 
       - name: Run script
         env:
