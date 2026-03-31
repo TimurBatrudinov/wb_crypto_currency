@@ -4,7 +4,6 @@ import requests
 import gspread
 from google.oauth2.service_account import Credentials
 import datetime
-from io import StringIO
 
 # --- 1. Получаем курс RUB→USDT ---
 url = "https://admin-service.whitebird.io/api/v1/exchange/calculation"
@@ -27,7 +26,7 @@ except Exception as e:
     print("Ошибка при получении курса:", e)
     exit(1)
 
-# --- 2. Подключаемся к Google Sheets напрямую из строки JSON ---
+# --- 2. Подключаемся к Google Sheets из строки JSON ---
 SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 
@@ -36,9 +35,10 @@ if not SERVICE_ACCOUNT_JSON or not SPREADSHEET_ID:
     exit(1)
 
 try:
-    # Восстанавливаем переносы строк в private_key
     service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
-    credentials = Credentials.from_service_account_info(service_account_info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    credentials = Credentials.from_service_account_info(
+        service_account_info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
     gc = gspread.authorize(credentials)
     sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 except Exception as e:
