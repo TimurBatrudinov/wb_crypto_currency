@@ -2,8 +2,8 @@ name: Get Ratio Hourly and Update Google Sheet
 
 on:
   schedule:
-    - cron: '0 * * * *'  # каждый час
-  workflow_dispatch:    # ручной запуск
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   fetch_and_update:
@@ -26,14 +26,4 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
-          # Восстанавливаем переносы строк в JSON
-          echo "${GOOGLE_SERVICE_ACCOUNT_JSON//\\n/$'\n'}" > service_account.json
-
-          # Проверяем, что файл не пустой
-          if [ ! -s service_account.json ]; then
-            echo "Ошибка: service_account.json пустой!"
-            exit 1
-          fi
-
-          # Запускаем Python скрипт
           python update_google_sheet.py
