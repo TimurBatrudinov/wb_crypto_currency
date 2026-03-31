@@ -25,7 +25,6 @@ def get_ratio(input_rub: str = "1000") -> str:
 
         data = response.json()
 
-        # Красивый вывод
         print("\nПолный ответ сервера:")
         print(json.dumps(data, indent=4, ensure_ascii=False))
 
@@ -36,6 +35,11 @@ def get_ratio(input_rub: str = "1000") -> str:
 
         print("\nИзвлечённое значение ratio:")
         print("ratio =", ratio)
+
+        # Сохраняем ratio в файл, чтобы Actions мог использовать как артефакт
+        with open("ratio.txt", "w", encoding="utf-8") as f:
+            f.write(str(ratio))
+
         return ratio
 
     except requests.exceptions.RequestException as e:
