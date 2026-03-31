@@ -68,11 +68,17 @@ def update_google_sheet(ratio: float) -> None:
         raise
 
 
+import sys
+
 def main():
     try:
         ratio = get_exchange_rate()
         update_google_sheet(ratio)
-    except Exception:
+    except Exception as e:
+        # Пишем в лог с полной трассировкой стека
+        logger.error("Execution failed", exc_info=True)
+        # Дополнительно выводим в stderr для надежности в GitHub Actions
+        print(f"\nCRITICAL ERROR: {e}", file=sys.stderr)
         exit(1)
 
 
