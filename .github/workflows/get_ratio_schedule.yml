@@ -26,6 +26,14 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
-          # Правильная запись JSON с переносами строк
-          printf "%s" "$GOOGLE_SERVICE_ACCOUNT_JSON" > service_account.json
+          # Восстанавливаем переносы строк в JSON
+          echo "${GOOGLE_SERVICE_ACCOUNT_JSON//\\n/$'\n'}" > service_account.json
+
+          # Проверяем, что файл не пустой
+          if [ ! -s service_account.json ]; then
+            echo "Ошибка: service_account.json пустой!"
+            exit 1
+          fi
+
+          # Запускаем Python скрипт
           python update_google_sheet.py
