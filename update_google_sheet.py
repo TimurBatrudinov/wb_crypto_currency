@@ -3,12 +3,13 @@ import json
 import logging
 import datetime
 import sys
+import random
 from typing import Optional, Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
-from playwright.sync_api import sync_playwright
 
 # Configure logging
 logging.basicConfig(
@@ -20,9 +21,8 @@ logger = logging.getLogger(__name__)
 # Constants
 WHITEBIRD_API_URL = "https://admin-service.whitebird.io/api/v1/exchange/calculation"
 ALTYN_API_URL = "https://api.lk.altyn.one/website/rates/"
-CIFRA_URL = "https://cifra.by/catalog/"
+CIFRA_API_BASE_URL = "https://api.cifra-broker.by/api/site/ticker"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-
 
 def get_whitebird_rate(from_currency: str = "RUB", to_currency: str = "USDT") -> float:
     """Fetches the exchange rate from the Whitebird API."""
@@ -36,97 +36,58 @@ def get_whitebird_rate(from_currency: str = "RUB", to_currency: str = "USDT") ->
         response = requests.post(WHITEBIRD_API_URL, json=payload, headers=headers, timeout=20)
         response.raise_for_status()
         data: Dict[str, Any] = response.json()
-        
         ratio = data.get("rate", {}).get("ratio")
         if ratio is None:
             raise ValueError("Field 'rate.ratio' not found in Whitebird API response")
-        
         logger.info(f"Whitebird ratio: {ratio}")
         return float(ratio)
     except Exception as e:
         logger.error(f"Error fetching Whitebird rate: {e}")
         raise
 
-
 def get_altyn_rate() -> float:
-    """Fetches the exchange rate from the Altyn API (translated from JS)."""
+    """Fetches the exchange rate from the Altyn API."""
     try:
         response = requests.get(ALTYN_API_URL, timeout=20)
         response.raise_for_status()
         data = response.json()
-        
-        # Taking the second element as per ALTYN.md logic (json[1])
         if len(data) < 2:
             raise ValueError("Altyn API returned less than 2 elements")
-            
         rate_val = float(data[1]["rate"])
         altyn_ratio = 1 / rate_val
-        
         logger.info(f"Altyn ratio: {altyn_ratio}")
         return altyn_ratio
     except Exception as e:
         logger.error(f"Error fetching Altyn rate: {e}")
         raise
 
-
 def get_cifra_rate() -> float:
-    """Fetches the exchange rate from Cifra by emulating a browser and intercepting API calls."""
-    logger.info("Starting browser emulation for Cifra...")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        )
-        page = context.new_page()
-        
-        target_json = {}
-        
-        def handle_response(response):
-            if "ticker?key=" in response.url:
-                try:
-                    data = response.json()
-                    target_json["data"] = data
-                except Exception:
-                    pass
+    """Fetches the exchange rate from Cifra API directly using a POST request."""
+    key = random.random()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Referer": "https://cifra.by/catalog/"
+    }
+    try:
+        response = requests.post(f"{CIFRA_API_BASE_URL}?key={key}", headers=headers, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+        tickers = data.get("data", {}).get("ticker", [])
+        for t in tickers:
+            if t.get("ticker") == "USDT-RUB.IMEX":
+                ltp = float(t.get("ltp"))
+                logger.info(f"Cifra ratio: {ltp}")
+                return ltp
+        raise ValueError("USDT-RUB.IMEX ticker not found in Cifra response")
+    except Exception as e:
+        logger.error(f"Error fetching Cifra rate: {e}")
+        raise
 
-        page.on("response", handle_response)
-        
-        try:
-            # Using domcontentloaded to be faster, then waiting for the specific request
-            page.goto(CIFRA_URL, wait_until="domcontentloaded", timeout=60000)
-            
-            # Wait for the background request to be intercepted
-            for _ in range(15):
-                if "data" in target_json:
-                    break
-                page.wait_for_timeout(1000)
-            
-            if "data" not in target_json:
-                raise ValueError("Failed to intercept Cifra ticker data within timeout")
-                
-            tickers = target_json["data"].get("data", {}).get("ticker", [])
-            for t in tickers:
-                if t.get("ticker") == "USDT-RUB.IMEX":
-                    ltp = float(t.get("ltp"))
-                    logger.info(f"Cifra ratio: {ltp}")
-                    return ltp
-            
-            raise ValueError("USDT-RUB.IMEX ticker not found in Cifra response")
-        except Exception as e:
-            logger.error(f"Error fetching Cifra rate: {e}")
-            raise
-        finally:
-            browser.close()
-
-
-# Cell coordinates (you can change these)
-CELL_UPDATE_TIME = "C1"
-CELL_WHITEBIRD = "B2"
-CELL_ALTYN = "B3"
-CELL_CIFRA = "B4"
+# Cell coordinates
+RANGE_TO_UPDATE = "B1:B4"
 
 def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float) -> None:
-    """Updates specific cells in the Google Sheet with the latest rates."""
+    """Updates the Google Sheet in a single batch call."""
     service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
 
@@ -143,24 +104,26 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: fl
         
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Updating specific cells
-        sheet.update_acell(CELL_UPDATE_TIME, now)
-        sheet.update_acell(CELL_WHITEBIRD, whitebird_rate)
-        sheet.update_acell(CELL_ALTYN, altyn_rate)
-        sheet.update_acell(CELL_CIFRA, cifra_rate)
+        # Batch update: column B, rows 1-4
+        values = [[now], [whitebird_rate], [altyn_rate], [cifra_rate]]
+        sheet.update(RANGE_TO_UPDATE, values)
         
-        logger.info(f"Successfully updated cells: {CELL_UPDATE_TIME}={now}, {CELL_WHITEBIRD}={whitebird_rate}, {CELL_ALTYN}={altyn_rate}, {CELL_CIFRA}={cifra_rate}")
+        logger.info(f"Successfully updated sheet range {RANGE_TO_UPDATE} with values: {values}")
     except Exception as e:
-        logger.error(f"Error updating Google Sheet cells: {e}")
+        logger.error(f"Error updating Google Sheet: {e}")
         raise
-
 
 def main():
     try:
-        # Fetching rates from all sources
-        whitebird_ratio = get_whitebird_rate()
-        altyn_ratio = get_altyn_rate()
-        cifra_ratio = get_cifra_rate()
+        # Fetching rates in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_whitebird = executor.submit(get_whitebird_rate)
+            future_altyn = executor.submit(get_altyn_rate)
+            future_cifra = executor.submit(get_cifra_rate)
+            
+            whitebird_ratio = future_whitebird.result()
+            altyn_ratio = future_altyn.result()
+            cifra_ratio = future_cifra.result()
         
         # Updating the sheet
         update_google_sheet(whitebird_ratio, altyn_ratio, cifra_ratio)
@@ -169,7 +132,6 @@ def main():
         logger.error("Execution failed", exc_info=True)
         print(f"\nCRITICAL ERROR: {e}", file=sys.stderr)
         exit(1)
-
 
 if __name__ == "__main__":
     main()
