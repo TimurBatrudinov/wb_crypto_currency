@@ -2,7 +2,8 @@ import os
 import json
 import logging
 import datetime
-from typing import Optional, Dict, Any
+import sys
+from typing import Optional, Dict, Any, List
 
 import requests
 import gspread
@@ -16,11 +17,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
-API_URL = "https://admin-service.whitebird.io/api/v1/exchange/calculation"
+WHITEBIRD_API_URL = "https://admin-service.whitebird.io/api/v1/exchange/calculation"
+ALTYN_API_URL = "https://api.lk.altyn.one/website/rates/"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
-def get_exchange_rate(from_currency: str = "RUB", to_currency: str = "USDT") -> float:
+def get_whitebird_rate(from_currency: str = "RUB", to_currency: str = "USDT") -> float:
     """Fetches the exchange rate from the Whitebird API."""
     payload = {
         "currencyPair": {"fromCurrency": from_currency, "toCurrency": to_currency},
@@ -29,23 +31,44 @@ def get_exchange_rate(from_currency: str = "RUB", to_currency: str = "USDT") -> 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
     try:
-        response = requests.post(API_URL, json=payload, headers=headers, timeout=20)
+        response = requests.post(WHITEBIRD_API_URL, json=payload, headers=headers, timeout=20)
         response.raise_for_status()
         data: Dict[str, Any] = response.json()
         
         ratio = data.get("rate", {}).get("ratio")
         if ratio is None:
-            raise ValueError("Field 'rate.ratio' not found in API response")
+            raise ValueError("Field 'rate.ratio' not found in Whitebird API response")
         
-        logger.info(f"Successfully fetched ratio: {ratio}")
+        logger.info(f"Whitebird ratio: {ratio}")
         return float(ratio)
     except Exception as e:
-        logger.error(f"Error fetching exchange rate: {e}")
+        logger.error(f"Error fetching Whitebird rate: {e}")
         raise
 
 
-def update_google_sheet(ratio: float) -> None:
-    """Connects to Google Sheets and appends a new row with the ratio."""
+def get_altyn_rate() -> float:
+    """Fetches the exchange rate from the Altyn API (translated from JS)."""
+    try:
+        response = requests.get(ALTYN_API_URL, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Taking the second element as per ALTYN.md logic (json[1])
+        if len(data) < 2:
+            raise ValueError("Altyn API returned less than 2 elements")
+            
+        rate_val = float(data[1]["rate"])
+        altyn_ratio = 1 / rate_val
+        
+        logger.info(f"Altyn ratio: {altyn_ratio}")
+        return altyn_ratio
+    except Exception as e:
+        logger.error(f"Error fetching Altyn rate: {e}")
+        raise
+
+
+def update_google_sheet(rates: List[float]) -> None:
+    """Connects to Google Sheets and appends a new row with timestamp and provided rates."""
     service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
 
@@ -61,23 +84,26 @@ def update_google_sheet(ratio: float) -> None:
         sheet = gc.open_by_key(spreadsheet_id).sheet1
         
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        sheet.append_row([now, ratio])
-        logger.info(f"Successfully recorded to sheet: {now} | {ratio}")
+        # Appending [timestamp, rate1, rate2, ...]
+        row = [now] + rates
+        sheet.append_row(row)
+        logger.info(f"Successfully recorded to sheet: {row}")
     except Exception as e:
         logger.error(f"Error updating Google Sheet: {e}")
         raise
 
 
-import sys
-
 def main():
     try:
-        ratio = get_exchange_rate()
-        update_google_sheet(ratio)
+        # Fetching rates from both sources
+        whitebird_ratio = get_whitebird_rate()
+        altyn_ratio = get_altyn_rate()
+        
+        # Updating the sheet
+        update_google_sheet([whitebird_ratio, altyn_ratio])
+        
     except Exception as e:
-        # Пишем в лог с полной трассировкой стека
         logger.error("Execution failed", exc_info=True)
-        # Дополнительно выводим в stderr для надежности в GitHub Actions
         print(f"\nCRITICAL ERROR: {e}", file=sys.stderr)
         exit(1)
 
