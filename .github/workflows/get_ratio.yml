@@ -23,7 +23,7 @@ jobs:
         run: python get_ratio.py
 
       - name: Upload ratio as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ratio
           path: ratio.txt
