@@ -67,8 +67,13 @@ def get_altyn_rate() -> float:
         raise
 
 
-def update_google_sheet(rates: List[float]) -> None:
-    """Connects to Google Sheets and appends a new row with timestamp and provided rates."""
+# Cell coordinates (you can change these)
+CELL_UPDATE_TIME = "C1"
+CELL_WHITEBIRD = "B2"
+CELL_ALTYN = "B3"
+
+def update_google_sheet(whitebird_rate: float, altyn_rate: float) -> None:
+    """Updates specific cells in the Google Sheet with the latest rates."""
     service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
 
@@ -84,12 +89,15 @@ def update_google_sheet(rates: List[float]) -> None:
         sheet = gc.open_by_key(spreadsheet_id).sheet1
         
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # Appending [timestamp, rate1, rate2, ...]
-        row = [now] + rates
-        sheet.append_row(row)
-        logger.info(f"Successfully recorded to sheet: {row}")
+        
+        # Updating specific cells
+        sheet.update_acell(CELL_UPDATE_TIME, now)
+        sheet.update_acell(CELL_WHITEBIRD, whitebird_rate)
+        sheet.update_acell(CELL_ALTYN, altyn_rate)
+        
+        logger.info(f"Successfully updated cells: {CELL_UPDATE_TIME}={now}, {CELL_WHITEBIRD}={whitebird_rate}, {CELL_ALTYN}={altyn_rate}")
     except Exception as e:
-        logger.error(f"Error updating Google Sheet: {e}")
+        logger.error(f"Error updating Google Sheet cells: {e}")
         raise
 
 
@@ -100,7 +108,7 @@ def main():
         altyn_ratio = get_altyn_rate()
         
         # Updating the sheet
-        update_google_sheet([whitebird_ratio, altyn_ratio])
+        update_google_sheet(whitebird_ratio, altyn_ratio)
         
     except Exception as e:
         logger.error("Execution failed", exc_info=True)
