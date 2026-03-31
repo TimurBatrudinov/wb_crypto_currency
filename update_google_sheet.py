@@ -29,7 +29,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 credentials = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 gc = gspread.authorize(credentials)
 
-SPREADSHEET_ID = "<ВАШ_SPREADSHEET_ID>"
+SPREADSHEET_ID = "1QcgQyiTsPKTkHvPRGAIibd3EoZ-GuCh4uorpLEAr9SI"
 sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 
 # Записываем новую строку
