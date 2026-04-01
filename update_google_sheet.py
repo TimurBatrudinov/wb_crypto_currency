@@ -84,7 +84,7 @@ def get_cifra_rate() -> float:
         raise
 
 # Cell coordinates
-RANGE_TO_UPDATE = "B1:B4"
+RANGE_TO_UPDATE = "B2:B4"
 
 def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float) -> None:
     """Updates the Google Sheet in a single batch call."""
@@ -105,7 +105,7 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: fl
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # Batch update: column B, rows 1-4
-        values = [[now], [whitebird_rate], [altyn_rate], [cifra_rate]]
+        values = [[whitebird_rate], [altyn_rate], [cifra_rate]]
         sheet.update(RANGE_TO_UPDATE, values)
         
         logger.info(f"Successfully updated sheet range {RANGE_TO_UPDATE} with values: {values}")
