@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
+from playwright.sync_api import sync_playwright
 
 # Configure logging
 logging.basicConfig(
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 WHITEBIRD_API_URL = "https://admin-service.whitebird.io/api/v1/exchange/calculation"
 ALTYN_API_URL = "https://api.lk.altyn.one/website/rates/"
 CIFRA_API_BASE_URL = "https://api.cifra-broker.by/api/site/ticker"
+SKYCAPITAL_URL = "https://skycapital.group/?baseAsset=USDT&quoteAsset=RUB"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 def get_whitebird_rate(from_currency: str = "RUB", to_currency: str = "USDT") -> float:
@@ -83,10 +85,39 @@ def get_cifra_rate() -> float:
         logger.error(f"Error fetching Cifra rate: {e}")
         raise
 
-# Cell coordinates
-RANGE_TO_UPDATE = "B2:B4"
+def get_skycapital_rate() -> float:
+    """Fetches the USDT-RUB exchange rate from Skycapital using Playwright."""
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(SKYCAPITAL_URL)
+            
+            page.wait_for_function("() => document.body.innerText.includes('instant')", timeout=30000)
+            
+            page_text = page.evaluate("() => document.body.innerText")
+            start = page_text.find("[")
+            end = page_text.rfind("]") + 1
+            json_str = page_text[start:end]
+            data = json.loads(json_str)
+            
+            browser.close()
+            
+            for item in data:
+                if item.get("baseAsset") == "USDT_SPL":
+                    rate = float(item["buy"])
+                    logger.info(f"Skycapital ratio: {rate}")
+                    return rate
+            
+            raise ValueError("USDT_SPL ticker not found in Skycapital response")
+    except Exception as e:
+        logger.error(f"Error fetching Skycapital rate: {e}")
+        raise
 
-def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float) -> None:
+# Cell coordinates
+RANGE_TO_UPDATE = "B2:B5"
+
+def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float, skycapital_rate: float) -> None:
     """Updates the Google Sheet in a single batch call."""
     service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
@@ -105,7 +136,7 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: fl
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # Batch update: column B, rows 1-4
-        values = [[whitebird_rate], [altyn_rate], [cifra_rate]]
+        values = [[whitebird_rate], [altyn_rate], [cifra_rate], [skycapital_rate]]
         sheet.update(RANGE_TO_UPDATE, values)
         
         logger.info(f"Successfully updated sheet range {RANGE_TO_UPDATE} with values: {values}")
@@ -116,17 +147,19 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: fl
 def main():
     try:
         # Fetching rates in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             future_whitebird = executor.submit(get_whitebird_rate)
             future_altyn = executor.submit(get_altyn_rate)
             future_cifra = executor.submit(get_cifra_rate)
+            future_skycapital = executor.submit(get_skycapital_rate)
             
             whitebird_ratio = future_whitebird.result()
             altyn_ratio = future_altyn.result()
             cifra_ratio = future_cifra.result()
+            skycapital_ratio = future_skycapital.result()
         
         # Updating the sheet
-        update_google_sheet(whitebird_ratio, altyn_ratio, cifra_ratio)
+        update_google_sheet(whitebird_ratio, altyn_ratio, cifra_ratio, skycapital_ratio)
         
     except Exception as e:
         logger.error("Execution failed", exc_info=True)
