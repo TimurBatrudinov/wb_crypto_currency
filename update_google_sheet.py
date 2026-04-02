@@ -141,10 +141,11 @@ def get_sky_rate() -> float:
         raise
 
 # Cell coordinates
-RANGE_TO_UPDATE = "B1:B5"
+RATES_RANGE = "B1:B4"
+DATE_CELL = "D1"
 
 def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float, sky_rate: float) -> None:
-    """Updates the Google Sheet in a single batch call."""
+    """Updates the Google Sheet: rates in B1:B4, timestamp in D1."""
     service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
 
@@ -161,11 +162,14 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: fl
         
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Batch update: column B, rows 1-5
-        values = [[now], [whitebird_rate], [altyn_rate], [cifra_rate], [sky_rate]]
-        sheet.update(RANGE_TO_UPDATE, values)
+        # Update rates in B2:B5
+        rates_values = [[whitebird_rate], [altyn_rate], [cifra_rate], [sky_rate]]
+        sheet.update(RATES_RANGE, rates_values)
         
-        logger.info(f"Successfully updated sheet range {RANGE_TO_UPDATE} with values: {values}")
+        # Update timestamp in D1
+        sheet.update(DATE_CELL, [[now]])
+        
+        logger.info(f"Successfully updated rates in {RATES_RANGE} and timestamp in {DATE_CELL}")
     except Exception as e:
         logger.error(f"Error updating Google Sheet: {e}")
         raise
