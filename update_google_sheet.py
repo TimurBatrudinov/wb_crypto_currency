@@ -157,7 +157,7 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: fl
             service_account_info, scopes=SCOPES
         )
         gc = gspread.authorize(credentials)
-        sheet = gc.open_by_key(spreadsheet_id).sheet1
+        sheet = gc.open_by_key(spreadsheet_id).worksheet('crypto_rates')
         
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
