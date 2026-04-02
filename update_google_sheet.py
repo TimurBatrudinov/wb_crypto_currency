@@ -141,7 +141,7 @@ def get_sky_rate() -> float:
         raise
 
 # Cell coordinates
-RATES_RANGE = "B1:B4"
+RATES_RANGE = "B2:B7"
 DATE_CELL = "D1"
 
 def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float, sky_rate: float) -> None:
