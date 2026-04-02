@@ -88,34 +88,26 @@ def get_skycapital_rate() -> float:
     """Fetches the exchange rate from SkyCapital using agent-browser."""
     url = "https://skycapital.group/?baseAsset=USDT&quoteAsset=RUB"
     try:
-        subprocess.run(["agent-browser", "open", url], capture_output=True, timeout=30)
-        subprocess.run(
-            ["agent-browser", "wait", "--load", "networkidle"],
-            capture_output=True, timeout=30
-        )
+        commands = [
+            ["open", url],
+            ["wait", "--load", "networkidle"],
+            ["snapshot", "-i"],
+            ["close"]
+        ]
         
         result = subprocess.run(
-            ["agent-browser", "eval", "document.getElementById('instant')?.innerText || document.getElementById('instant')?.textContent"],
-            capture_output=True, text=True, timeout=30
+            ["agent-browser", "batch", "--json"],
+            input=json.dumps(commands),
+            capture_output=True, text=True, timeout=60
         )
         
         output = result.stdout.strip()
-        json_start = output.find("{")
-        if json_start == -1:
-            json_start = output.find("[")
-        if json_start != -1:
-            data = json.loads(output[json_start:])
-            for item in data:
-                if item.get("baseAsset") == "USDT_SPL":
-                    buy_rate = float(item.get("buy"))
-                    logger.info(f"SkyCapital ratio: {buy_rate}")
-                    return buy_rate
-        raise ValueError("USDT_SPL not found in SkyCapital response")
+        logger.info(f"SkyCapital output: {output[:2000]}")
+        
+        raise ValueError("Debug - check logs")
     except Exception as e:
         logger.error(f"Error fetching SkyCapital rate: {e}")
         raise
-    finally:
-        subprocess.run(["agent-browser", "close"], capture_output=True)
 
 # Cell coordinates
 RANGE_TO_UPDATE = "B2:B5"
