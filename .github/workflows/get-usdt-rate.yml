@@ -2,8 +2,6 @@ name: Get USDT-RUB Rate
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 * * * *'
 
 jobs:
   get-rate:
