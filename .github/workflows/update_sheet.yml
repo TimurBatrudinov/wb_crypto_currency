@@ -15,6 +15,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm' # Теперь кэширование npm работает, так как есть package.json
 
       - name: Install agent-browser
         run: npm install -g agent-browser
@@ -23,7 +24,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip' # built-in caching for pip dependencies
+          cache: 'pip' # Кэширование pip (зависит от requirements.txt)
 
       - name: Install dependencies
         run: |
