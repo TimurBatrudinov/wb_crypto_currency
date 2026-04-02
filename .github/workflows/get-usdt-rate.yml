@@ -1,0 +1,38 @@
+name: Get USDT-RUB Rate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *'
+
+jobs:
+  get-rate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      
+      - name: Install Chrome
+        run: |
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+          apt-get update
+          apt-get install -y google-chrome-stable
+      
+      - name: Install agent-browser
+        run: |
+          npm install -g agent-browser
+          agent-browser install
+      
+      - name: Run Python script
+        run: python get_usdt_rate.py
+      
+      - name: Close browser
+        if: always()
+        run: agent-browser close || true
