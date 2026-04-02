@@ -4,13 +4,13 @@ import logging
 import datetime
 import sys
 import random
+import subprocess
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
-from playwright.sync_api import sync_playwright
 
 # Configure logging
 logging.basicConfig(
@@ -85,27 +85,37 @@ def get_cifra_rate() -> float:
         raise
 
 def get_skycapital_rate() -> float:
-    """Fetches the exchange rate from SkyCapital using browser emulation."""
+    """Fetches the exchange rate from SkyCapital using agent-browser."""
     url = "https://skycapital.group/?baseAsset=USDT&quoteAsset=RUB"
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url)
-            page.wait_for_selector("#instant", timeout=30000)
-            data = page.evaluate("() => document.getElementById('instant').textContent")
-            browser.close()
-            
-            rates = json.loads(data)
-            for item in rates:
+        subprocess.run(["agent-browser", "open", url], capture_output=True, timeout=30)
+        subprocess.run(
+            ["agent-browser", "wait", "--load", "networkidle"],
+            capture_output=True, timeout=30
+        )
+        
+        result = subprocess.run(
+            ["agent-browser", "eval", "document.getElementById('instant')?.innerText || document.getElementById('instant')?.textContent"],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        output = result.stdout.strip()
+        json_start = output.find("{")
+        if json_start == -1:
+            json_start = output.find("[")
+        if json_start != -1:
+            data = json.loads(output[json_start:])
+            for item in data:
                 if item.get("baseAsset") == "USDT_SPL":
                     buy_rate = float(item.get("buy"))
                     logger.info(f"SkyCapital ratio: {buy_rate}")
                     return buy_rate
-            raise ValueError("USDT_SPL not found in SkyCapital response")
+        raise ValueError("USDT_SPL not found in SkyCapital response")
     except Exception as e:
         logger.error(f"Error fetching SkyCapital rate: {e}")
         raise
+    finally:
+        subprocess.run(["agent-browser", "close"], capture_output=True)
 
 # Cell coordinates
 RANGE_TO_UPDATE = "B2:B5"
