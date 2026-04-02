@@ -1,0 +1,7 @@
+{
+  "name": "wb-currency-tracker",
+  "version": "1.0.0",
+  "dependencies": {
+    "agent-browser": "latest"
+  }
+}
