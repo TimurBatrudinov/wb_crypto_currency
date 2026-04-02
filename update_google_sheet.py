@@ -4,7 +4,6 @@ import logging
 import datetime
 import sys
 import random
-import subprocess
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 
@@ -23,6 +22,7 @@ logger = logging.getLogger(__name__)
 WHITEBIRD_API_URL = "https://admin-service.whitebird.io/api/v1/exchange/calculation"
 ALTYN_API_URL = "https://api.lk.altyn.one/website/rates/"
 CIFRA_API_BASE_URL = "https://api.cifra-broker.by/api/site/ticker"
+SKY_API_URL = "https://api.skycapital.group/exchange-rates/instant"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 def get_whitebird_rate(from_currency: str = "RUB", to_currency: str = "USDT") -> float:
@@ -84,36 +84,66 @@ def get_cifra_rate() -> float:
         logger.error(f"Error fetching Cifra rate: {e}")
         raise
 
-def get_skycapital_rate() -> float:
+def get_sky_rate() -> float:
     """Fetches the exchange rate from SkyCapital using agent-browser."""
-    url = "https://skycapital.group/?baseAsset=USDT&quoteAsset=RUB"
+    import subprocess
+    import re
+    import time
+    
+    session = f"rate_{int(time.time())}"
+    
+    if os.name == 'nt':
+        chrome_path = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        base = f'agent-browser --executable-path "{chrome_path}" --session {session}'
+    else:
+        base = f'agent-browser --session {session}'
+
     try:
-        commands = [
-            ["open", url],
-            ["network", "route", "*api*instant*"],
-            ["wait", "--load", "networkidle"],
-            ["network", "requests"],
-            ["close"]
-        ]
+        logger.info("SkyCapital: Opening browser...")
+        subprocess.run(f'{base} open https://skycapital.group/?baseAsset=USDT&quoteAsset=RUB', shell=True, capture_output=True, timeout=30)
+
+        logger.info("SkyCapital: Getting token...")
+        cookie_result = subprocess.run(f'agent-browser --session {session} cookies get access_token', shell=True, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15)
+
+        m = re.search(r'access_token=([^\s]+)', cookie_result.stdout)
+        token = m.group(1) if m else None
+
+        if not token:
+            raise ValueError("No token found for SkyCapital")
+
+        logger.info("SkyCapital: Fetching rates...")
+        fetch_cmd = f'agent-browser --session {session} eval "fetch(\'{SKY_API_URL}\', {{headers: {{\'Authorization\': \'Bearer {token}\'}}}}) .then(r=>r.json()).then(d=>console.log(JSON.stringify(d)))"'
+        subprocess.run(fetch_cmd, shell=True, capture_output=True, timeout=15)
+
+        time.sleep(2)
+
+        logger.info("SkyCapital: Getting console output...")
+        console_result = subprocess.run(f'agent-browser --session {session} console', shell=True, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15)
+
+        tickers = ['USDT_SPL', 'USDT_ERC20', 'USDT']
+        for line in console_result.stdout.split('\n'):
+            line = line.strip()
+            if line.startswith('[log]'):
+                line = line[5:].strip()
+                try:
+                    data = json.loads(line)
+                    for item in data:
+                        if item['baseAsset'] in tickers and item['quoteAsset'] == 'RUB':
+                            rate = float(item['sell'])
+                            logger.info(f"SkyCapital ratio: {rate}")
+                            return rate
+                except:
+                    continue
         
-        result = subprocess.run(
-            ["agent-browser", "batch", "--json"],
-            input=json.dumps(commands),
-            capture_output=True, text=True, timeout=90
-        )
-        
-        output = result.stdout.strip()
-        logger.info(f"SkyCapital output: {output[:3000]}")
-        
-        raise ValueError("Debug - check network output")
+        raise ValueError("SkyCapital rate not found in console output")
     except Exception as e:
         logger.error(f"Error fetching SkyCapital rate: {e}")
         raise
 
 # Cell coordinates
-RANGE_TO_UPDATE = "B2:B5"
+RANGE_TO_UPDATE = "B1:B5"
 
-def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float, skycapital_rate: float) -> None:
+def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: float, sky_rate: float) -> None:
     """Updates the Google Sheet in a single batch call."""
     service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     spreadsheet_id = os.environ.get("SPREADSHEET_ID")
@@ -131,8 +161,8 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: fl
         
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Batch update: column B, rows 1-4
-        values = [[whitebird_rate], [altyn_rate], [cifra_rate], [skycapital_rate]]
+        # Batch update: column B, rows 1-5
+        values = [[now], [whitebird_rate], [altyn_rate], [cifra_rate], [sky_rate]]
         sheet.update(RANGE_TO_UPDATE, values)
         
         logger.info(f"Successfully updated sheet range {RANGE_TO_UPDATE} with values: {values}")
@@ -143,19 +173,20 @@ def update_google_sheet(whitebird_rate: float, altyn_rate: float, cifra_rate: fl
 def main():
     try:
         # Fetching rates in parallel using ThreadPoolExecutor
+        # Note: get_sky_rate might be slow due to browser interactions
         with ThreadPoolExecutor(max_workers=4) as executor:
             future_whitebird = executor.submit(get_whitebird_rate)
             future_altyn = executor.submit(get_altyn_rate)
             future_cifra = executor.submit(get_cifra_rate)
-            future_skycapital = executor.submit(get_skycapital_rate)
+            future_sky = executor.submit(get_sky_rate)
             
             whitebird_ratio = future_whitebird.result()
             altyn_ratio = future_altyn.result()
             cifra_ratio = future_cifra.result()
-            skycapital_ratio = future_skycapital.result()
+            sky_ratio = future_sky.result()
         
         # Updating the sheet
-        update_google_sheet(whitebird_ratio, altyn_ratio, cifra_ratio, skycapital_ratio)
+        update_google_sheet(whitebird_ratio, altyn_ratio, cifra_ratio, sky_ratio)
         
     except Exception as e:
         logger.error("Execution failed", exc_info=True)
