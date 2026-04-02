@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 WHITEBIRD_API_URL = "https://admin-service.whitebird.io/api/v1/exchange/calculation"
 ALTYN_API_URL = "https://api.lk.altyn.one/website/rates/"
 CIFRA_API_BASE_URL = "https://api.cifra-broker.by/api/site/ticker"
-SKYCAPITAL_URL = "https://skycapital.group/?baseAsset=USDT&quoteAsset=RUB"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 def get_whitebird_rate(from_currency: str = "RUB", to_currency: str = "USDT") -> float:
@@ -86,32 +85,26 @@ def get_cifra_rate() -> float:
         raise
 
 def get_skycapital_rate() -> float:
-    """Fetches the USDT-RUB exchange rate from Skycapital using Playwright."""
+    """Fetches the exchange rate from SkyCapital using browser emulation."""
+    url = "https://skycapital.group/?baseAsset=USDT&quoteAsset=RUB"
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            page.goto(SKYCAPITAL_URL)
-            
-            page.wait_for_function("() => document.body.innerText.includes('instant')", timeout=30000)
-            
-            page_text = page.evaluate("() => document.body.innerText")
-            start = page_text.find("[")
-            end = page_text.rfind("]") + 1
-            json_str = page_text[start:end]
-            data = json.loads(json_str)
-            
+            page.goto(url)
+            page.wait_for_selector("#instant", timeout=30000)
+            data = page.evaluate("() => document.getElementById('instant').textContent")
             browser.close()
             
-            for item in data:
+            rates = json.loads(data)
+            for item in rates:
                 if item.get("baseAsset") == "USDT_SPL":
-                    rate = float(item["buy"])
-                    logger.info(f"Skycapital ratio: {rate}")
-                    return rate
-            
-            raise ValueError("USDT_SPL ticker not found in Skycapital response")
+                    buy_rate = float(item.get("buy"))
+                    logger.info(f"SkyCapital ratio: {buy_rate}")
+                    return buy_rate
+            raise ValueError("USDT_SPL not found in SkyCapital response")
     except Exception as e:
-        logger.error(f"Error fetching Skycapital rate: {e}")
+        logger.error(f"Error fetching SkyCapital rate: {e}")
         raise
 
 # Cell coordinates
