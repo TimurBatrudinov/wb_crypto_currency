@@ -90,21 +90,22 @@ def get_skycapital_rate() -> float:
     try:
         commands = [
             ["open", url],
+            ["network", "route", "*api*instant*"],
             ["wait", "--load", "networkidle"],
-            ["snapshot", "-i"],
+            ["network", "requests"],
             ["close"]
         ]
         
         result = subprocess.run(
             ["agent-browser", "batch", "--json"],
             input=json.dumps(commands),
-            capture_output=True, text=True, timeout=60
+            capture_output=True, text=True, timeout=90
         )
         
         output = result.stdout.strip()
-        logger.info(f"SkyCapital output: {output[:2000]}")
+        logger.info(f"SkyCapital output: {output[:3000]}")
         
-        raise ValueError("Debug - check logs")
+        raise ValueError("Debug - check network output")
     except Exception as e:
         logger.error(f"Error fetching SkyCapital rate: {e}")
         raise
